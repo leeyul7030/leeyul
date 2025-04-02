@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FPS 게임</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128/examples/js/controls/PointerLockControls.js"></script>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: Arial, sans-serif; }
+        #startButton {
+            position: absolute; top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            padding: 15px 30px; font-size: 22px;
+            background: #ff5733; color: white; border: none; cursor: pointer;
+            border-radius: 10px; font-weight: bold;
+        }
+        #hud {
+            position: absolute; top: 10px; left: 10px;
+            display: flex; align-items: center; gap: 20px;
+        }
+        #hpContainer {
+            width: 200px; height: 25px; background: #333; border-radius: 5px;
+            border: 2px solid white; position: relative;
+        }
+        #hpBar {
+            width: 100%; height: 100%; background: red;
+            border-radius: 5px; transition: width 0.2s ease;
+        }
+        #waveDisplay {
+            font-size: 22px; color: white; font-weight: bold;
+            background: rgba(0, 0, 0, 0.5); padding: 8px 15px;
+            border-radius: 10px;
+        }
+        #crosshair {
+            position: absolute; top: 50%; left: 50%;
+            width: 10px; height: 10px; background: white;
+            border-radius: 50%; transform: translate(-50%, -50%);
+            opacity: 0.8;
+        }
+    </style>
+</head>
+<body>
+    <button id="startButton">게임 시작</button>
+    <div id="hud">
+        <div id="hpContainer"><div id="hpBar"></div></div>
+        <div id="waveDisplay">Wave: 1</div>
+    </div>
+    <div id="crosshair"></div>
+    <script>
+        let scene, camera, renderer, controls;
+        let enemies = [];
+        let bullets = [];
+        let playerHP = 100;
+        let wave = 1;
+        const enemySpeed = 0.02;
+        const attackRange = 2;
+        const attackDamage = 10;
+        const bulletSpeed = 0.5;
+        const bulletMaxDistance = 50;
+
+        function init() {
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            renderer = new THREE.WebGLRenderer();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.body.appendChild(renderer.domElement);
+
+            controls = new THREE.PointerLockControls(camera, document.body);
+            document.getElementById('startButton').addEventListener('click', () => {
+                controls.lock();
+                document.getElementById('startButton').style.display = 'none';
+            });
+
+            scene.add(controls.getObject());
+
+            // 바닥 생성
+            let floorGeometry = new THREE.PlaneGeometry(50, 50);
+            let floorMaterial = new THREE.MeshBasicMaterial({ color: 0x808080, side: THREE.DoubleSide });
+            let floor = new THREE.Mesh(floorGeometry, floorMaterial);
+            floor.rotation.x = -Math.PI / 2;
+            scene.add(floor);
+
+            // 적군 추가
+            addEnemies(5);
+
+            document.addEventListener("click", shootBullet);
+
+            camera.position.y = 1.6;
+            animate();
+        }
+
+        function addEnemies(count) {
+            for (let i = 0; i < count; i++) {
+                let enemyGeometry = new THREE.BoxGeometry(1, 2, 1);
+                let enemyMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+                let enemy = new THREE.Mesh(enemyGeometry, enemyMaterial);
+                enemy.position.set(Math.random() * 30 - 15, 1, Math.random() * 30 - 15);
+                enemy.userData = { lastAttack: 0 };
+                scene.add(enemy);
+                enemies.push(enemy);
+            }
+        }
+
+        function updateEnemies() {
+            let playerPosition = controls.getObject().position;
+
+            enemies.forEach((enemy, index) => {
+                let enemyPosition = enemy.position;
+                let direction = new THREE.Vector3();
+                direction.subVectors(playerPosition, enemyPosition).normalize();
+                enemy.position.addScaledVector(direction, enemySpeed);
+
+                let distance = enemy.position.distanceTo(playerPosition);
+                if (distance < attackRange) {
+                    let currentTime = performance.now();
+                    if (currentTime - enemy.userData.lastAttack > 1000) {
+                        playerHP -= attackDamage;
+                        enemy.userData.lastAttack = currentTime;
+                        updateHP();
+                        if (playerHP <= 0) {
+                            alert("게임 오버!");
+                            location.reload();
+                        }
+                    }
+                }
+            });
+        }
+
+        function shootBullet() {
+            let bulletGeometry = new THREE.SphereGeometry(0.2, 8, 8);
+            let bulletMaterial = new THREE.MeshBasicMaterial({ color: 0xffff00 });
+            let bullet = new THREE.Mesh(bulletGeometry, bulletMaterial);
+            let direction = new THREE.Vector3();
+            camera.getWorldDirection(direction);
+            bullet.position.copy(camera.position);
+            bullet.userData = { direction: direction.clone(), distanceTraveled: 0 };
+            scene.add(bullet);
+            bullets.push(bullet);
+        }
+
+        function updateBullets() {
+            for (let i = bullets.length - 1; i >= 0; i--) {
+                let bullet = bullets[i];
+                let moveDistance = bulletSpeed;
+                bullet.position.addScaledVector(bullet.userData.direction, moveDistance);
+                bullet.userData.distanceTraveled += moveDistance;
+
+                if (bullet.userData.distanceTraveled > bulletMaxDistance) {
+                    scene.remove(bullet);
+                    bullets.splice(i, 1);
+                    continue;
+                }
+
+                for (let j = enemies.length - 1; j >= 0; j--) {
+                    let enemy = enemies[j];
+                    if (bullet.position.distanceTo(enemy.position) < 1) {
+                        scene.remove(enemy);
+                        enemies.splice(j, 1);
+                        scene.remove(bullet);
+                        bullets.splice(i, 1);
+                        break;
+                    }
+                }
+            }
+        }
+
+        function checkWaveCompletion() {
+            if (enemies.length === 0) {
+                wave++;
+                document.getElementById('waveDisplay').textContent = `Wave: ${wave}`;
+                addEnemies(wave * 2);
+            }
+        }
+
+        function updateHP() {
+            let hpPercentage = Math.max(playerHP, 0);
+            document.getElementById('hpBar').style.width = hpPercentage + "%";
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            updateEnemies();
+            updateBullets();
+            checkWaveCompletion();
+            renderer.render(scene, camera);
+        }
+
+        init();
+    </script>
+</body>
+</html>
